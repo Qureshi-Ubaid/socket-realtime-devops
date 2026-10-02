@@ -1,4 +1,4 @@
-Pipeline Execution Flow Chart
+# Pipeline Execution Flow Chart
 
 +------------------+       +-------------------+       +-----------------------+
 |  1. Developer    | ----> | 2. GitHub Repo    | ----> | 3. GitHub Actions     |
