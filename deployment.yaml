@@ -13,10 +13,19 @@ spec:
     metadata:
       labels:
         app: socket-app
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "3000"
     spec:
       containers:
       - name: socket-app
-        image: ubaidqureshi92/socket-realtime-app:latest
+        image: ubaidqureshi92/socket-realtime-app:v2
         imagePullPolicy: Always
         ports:
         - containerPort: 3000
+        env:
+        - name: REDIS_HOST
+          value: "redis-service"
+        - name: REDIS_PORT
+          value: "6379"
