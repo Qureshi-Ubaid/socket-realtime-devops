@@ -9,7 +9,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// Prometheus Setup
+// Prometheus metrics setup
 const register = new promClient.Registry();
 promClient.collectDefaultMetrics({ register });
 const activeConnectionsGauge = new promClient.Gauge({
@@ -18,35 +18,41 @@ const activeConnectionsGauge = new promClient.Gauge({
 });
 register.registerMetric(activeConnectionsGauge);
 
-// Root Route - Serves HTML test page directly
+app.get('/metrics', async (req, res) => {
+  res.set('Content-Type', register.contentType);
+  res.end(await register.metrics());
+});
+
+// Root UI Route
 app.get('/', (req, res) => {
   res.send(`
     <!DOCTYPE html>
     <html>
     <head>
-      <title>Socket.IO Redis Test</title>
+      <title>Socket.IO Multi-Pod Test</title>
       <script src="/socket.io/socket.io.js"></script>
       <style>
-        body { font-family: Arial, sans-serif; margin: 30px; }
+        body { font-family: Arial, sans-serif; margin: 30px; background-color: #f4f4f9; }
         #messages { list-style-type: none; padding: 0; }
-        #messages li { padding: 8px 12px; margin-bottom: 6px; background: #eef2f5; border-radius: 4px; }
-        input { padding: 8px; width: 250px; }
-        button { padding: 8px 15px; }
+        #messages li { padding: 8px 12px; margin-bottom: 6px; background: white; border-radius: 4px; border: 1px solid #ccc; }
+        input { padding: 10px; width: 300px; border: 1px solid #ccc; border-radius: 4px; }
+        button { padding: 10px 15px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
       </style>
     </head>
     <body>
-      <h2>Socket.IO Multi-Pod Redis Test</h2>
-      <p>Connected to Pod: <strong>${process.env.HOSTNAME || 'local'}</strong></p>
-      <input id="input" autocomplete="off" placeholder="Type a message..." />
-      <button onclick="sendMessage()">Send</button>
+      <h2>Socket.IO Multi-Pod Redis Sync Test</h2>
+      <p><strong>Connected to Pod:</strong> <span style="color: blue;">${process.env.HOSTNAME || 'local'}</span></p>
+      <input id="input" autocomplete="off" placeholder="Type a message..." /><button onclick="sendMessage()">Send</button>
       <ul id="messages"></ul>
 
       <script>
         const socket = io();
+        const messages = document.getElementById('messages');
+        
         socket.on('message', (msg) => {
           const item = document.createElement('li');
-          item.textContent = \`[\${msg.pod}]: \${msg.data}\`;
-          document.getElementById('messages').appendChild(item);
+          item.innerHTML = '<strong>' + msg.pod + ':</strong> ' + msg.data;
+          messages.appendChild(item);
         });
 
         function sendMessage() {
@@ -62,13 +68,7 @@ app.get('/', (req, res) => {
   `);
 });
 
-// Metrics Endpoint
-app.get('/metrics', async (req, res) => {
-  res.set('Content-Type', register.contentType);
-  res.end(await register.metrics());
-});
-
-// Redis Adapter Configuration
+// Redis connection details
 const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
 const REDIS_PORT = process.env.REDIS_PORT || 6379;
 

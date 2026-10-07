@@ -1,102 +1,51 @@
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const { createClient } = require('redis');
-const { createAdapter } = require('@socket.io/redis-adapter');
-const promClient = require('prom-client');
+name: CI/CD Pipeline - Socket.IO App
 
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
 
-// Prometheus metrics setup
-const register = new promClient.Registry();
-promClient.collectDefaultMetrics({ register });
-const activeConnectionsGauge = new promClient.Gauge({
-  name: 'socket_io_active_connections',
-  help: 'Number of active Socket.IO connections',
-});
-register.registerMetric(activeConnectionsGauge);
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
 
-app.get('/metrics', async (req, res) => {
-  res.set('Content-Type', register.contentType);
-  res.end(await register.metrics());
-});
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
 
-// Root UI Route for testing Multi-Pod Realtime Communication
-app.get('/', (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>Socket.IO Multi-Pod Test</title>
-      <script src="/socket.io/socket.io.js"></script>
-      <style>
-        body { font-family: Arial, sans-serif; margin: 30px; background-color: #f4f4f9; }
-        #messages { list-style-type: none; padding: 0; }
-        #messages li { padding: 8px 12px; margin-bottom: 6px; background: white; border-radius: 4px; border: 1px solid #ccc; }
-        input { padding: 10px; width: 300px; border: 1px solid #ccc; border-radius: 4px; }
-        button { padding: 10px 15px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
-      </style>
-    </head>
-    <body>
-      <h2>Socket.IO Multi-Pod Redis Sync Test</h2>
-      <p><strong>Connected to Pod:</strong> <span style="color: blue;">${process.env.HOSTNAME || 'local'}</span></p>
-      <input id="input" autocomplete="off" placeholder="Type a message..." /><button onclick="sendMessage()">Send</button>
-      <ul id="messages"></ul>
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
 
-      <script>
-        const socket = io();
-        const messages = document.getElementById('messages');
-        
-        socket.on('message', (msg) => {
-          const item = document.createElement('li');
-          item.innerHTML = '<strong>' + msg.pod + ':</strong> ' + msg.data;
-          messages.appendChild(item);
-        });
+    - name: Install Dependencies
+      run: npm install
 
-        function sendMessage() {
-          const input = document.getElementById('input');
-          if (input.value) {
-            socket.emit('message', input.value);
-            input.value = '';
-          }
-        }
-      </script>
-    </body>
-    </html>
-  `);
-});
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-// Redis connection details
-const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
-const REDIS_PORT = process.env.REDIS_PORT || 6379;
+    - name: Build and Push Docker Image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: |
+          ${{ secrets.DOCKERHUB_USERNAME }}/socket-realtime-app:latest
+          ${{ secrets.DOCKERHUB_USERNAME }}/socket-realtime-app:v3
 
-const pubClient = createClient({ url: `redis://${REDIS_HOST}:${REDIS_PORT}` });
-const subClient = pubClient.duplicate();
+    - name: Setup Minikube Cluster
+      uses: medyagh/setup-minikube@master
 
-Promise.all([pubClient.connect(), subClient.connect()]).then(() => {
-  io.adapter(createAdapter(pubClient, subClient));
-  console.log('Connected to Redis Adapter successfully');
-}).catch((err) => {
-  console.error('Redis connection error:', err);
-});
+    - name: Deploy to Minikube
+      run: |
+        kubectl apply -f deployment.yaml
+        kubectl apply -f service.yaml
 
-// Socket.IO Logic
-io.on('connection', (socket) => {
-  activeConnectionsGauge.inc();
-  console.log(`User connected to Pod: ${process.env.HOSTNAME || 'local'}`);
-
-  socket.on('message', (data) => {
-    io.emit('message', { data, pod: process.env.HOSTNAME });
-  });
-
-  socket.on('disconnect', () => {
-    activeConnectionsGauge.dec();
-    console.log('User disconnected');
-  });
-});
-
-server.listen(3000, () => {
-  console.log('Server running on port 3000');
-});
+    - name: Verify Cluster Resources
+      run: |
+        kubectl get pods
+        kubectl get svc
